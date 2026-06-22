@@ -2,6 +2,10 @@
 __MACOSX/
 .DS_Store
 
+# Runtime data
+enterprise-qa/data/
+enterprise-qa/.claude/
+
 # Python
 __pycache__/
 *.py[cod]

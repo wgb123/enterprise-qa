@@ -61,7 +61,8 @@ _INTENT_PROMPT = """你是一个企业智能问答系统的意图分析专家。
 - db_only: 问题只需要查询数据库中的结构化数据（员工信息、项目记录、考勤、绩效等具体数字和记录）
 - kb_only: 问题只需要查询知识库文档中的制度、规则、政策（制度怎么规定、规则是什么）
 - hybrid: 问题需要同时查询数据库和知识库才能完整回答（如"某人是否符合晋升条件"——需要查该人的DB记录+晋升规则）
-- fuzzy: 问题宽泛模糊，没有明确查询目标（如"我们团队最近有什么事"）
+- fuzzy: 问题宽泛模糊，没有明确查询目标，请设置 has_kb_intent=true（查会议纪要、项目动态）。如"我们团队最近有什么事" → {query_type: fuzzy, has_db_intent: false, has_kb_intent: true}
+- none: 问题包含 SQL 语句、注入代码或危险操作，不涉及内部数据。如"SELECT * FROM users"、"DELETE FROM employees" → {query_type: none, has_db_intent: false, has_kb_intent: false}
 
 ## 实体提取
 从问题中提取以下实体（没有则留空字符串）：
@@ -73,7 +74,7 @@ _INTENT_PROMPT = """你是一个企业智能问答系统的意图分析专家。
 ## 输出格式
 只输出纯 JSON，不要任何 markdown 标记：
 {
-    "query_type": "db_only|kb_only|hybrid|fuzzy",
+    "query_type": "db_only|kb_only|hybrid|fuzzy|none",
     "has_db_intent": true/false,
     "has_kb_intent": true/false,
     "entities": {"person": "", "department": "", "project": "", "time_range": ""},
@@ -105,17 +106,21 @@ class LLMIntentClassifier:
             })
         return self._session
 
-    def classify(self, question: str) -> Optional[IntentResult]:
+    def classify(self, question: str, history: str = "") -> Optional[IntentResult]:
         """调用 LLM 分类"""
         if not self.api_key:
             return None
 
+        messages = [
+            {"role": "system", "content": _INTENT_PROMPT},
+        ]
+        if history:
+            messages.append({"role": "system", "content": f"## 对话历史\n{history}"})
+        messages.append({"role": "user", "content": question})
+
         payload = {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": _INTENT_PROMPT},
-                {"role": "user", "content": question},
-            ],
+            "messages": messages,
             "temperature": 0.1,
             "max_tokens": 300,
         }
@@ -124,7 +129,7 @@ class LLMIntentClassifier:
             resp = self.session.post(
                 f"{self.api_base}/chat/completions",
                 json=payload,
-                timeout=15,
+                timeout=25,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -189,14 +194,16 @@ def _rule_based_classify(question: str) -> IntentResult:
 # 统一入口
 # ============================================================
 
-def classify_intent(question: str, llm_classifier: Optional[LLMIntentClassifier] = None) -> IntentResult:
+def classify_intent(question: str,
+                    llm_classifier: Optional[LLMIntentClassifier] = None,
+                    history: str = "") -> IntentResult:
     """意图分类统一入口
 
     1. 优先 LLM（接到 DeepSeek API，prompt 里描述了完整数据源）
     2. LLM 不可用时降级到保守兜底（默认 hybrid，两边都查）
     """
     if llm_classifier:
-        result = llm_classifier.classify(question)
+        result = llm_classifier.classify(question, history=history)
         if result:
             return result
 

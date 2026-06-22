@@ -23,7 +23,10 @@ _ANSWER_PROMPT = """你是一个企业智能问答助手。根据以下查询结
 ## 回答要求
 1. 用简洁的中文自然语言回答，不要 dump 原始数据
 2. 如果数据不足，明确说明，不编造
-3. 对于混合查询（晋升评估等），用表格对比条件和实际情况
+3. 对于混合查询（晋升评估、考勤检查等），**必须用表格逐条对比**条件和实际情况，逐项标 ✓/✗
+4. 查"某人负责的项目"时，输出格式为"项目名(角色)"列表，如：ReMe记忆框架(lead), 数据分析平台(lead), 智能问答系统(core), 移动端App(contributor)
+5. 查"部门有多少人"时，输出格式为"X 人（姓名1、姓名2、...）"
+6. **数据优先级：数据库 > 制度文档 > 会议纪要**。如果数据库能直接回答（如查员工、查领导），优先用数据库结果
 
 ## 用户问题
 {question}
@@ -67,7 +70,7 @@ class ResponseFusion:
         except StopIteration as e:
             return e.value or "", trace
 
-    def answer_stream(self, intent: IntentResult) -> Generator[tuple[str, dict], None, str]:
+    def answer_stream(self, intent: IntentResult, history: str = "") -> Generator[tuple[str, dict], None, str]:
         """流式执行查询，逐步产出事件
 
         Yields:
@@ -78,6 +81,43 @@ class ResponseFusion:
         最终 return: 完整回答文本（含来源标注）
         """
         sources: list[str] = []
+
+        # 如果当前轮没有实体但有多轮上下文，尝试从历史推断
+        if not intent.entities.get("person") and not intent.entities.get("department") and history:
+            # 判断当前问题更可能指人还是部门
+            q = intent.original_question
+            person_keywords = ("晋升", "绩效", "KPI", "考核", "迟到", "请假", "考勤",
+                               "他", "她", "他们", "她们", "邮箱", "电话", "上级", "领导")
+            dept_keywords = ("部门", "团队", "组", "部")
+
+            wants_person = any(k in q for k in person_keywords)
+            wants_dept = not wants_person and any(k in q for k in dept_keywords)
+
+            # 从历史中找最近出现的人名
+            name_stopwords = {"什么", "怎么", "如何", "哪里", "多少", "部门", "项目", "绩效", "迟到", "规则", "符合", "条件"}
+            name_in_history = re.findall(r'([\u4e00-\u9fff]{2,3})', history)
+            last_person = ""
+            for n in reversed(name_in_history):
+                n = n.rstrip("的")
+                if n not in name_stopwords:
+                    last_person = n
+                    break
+
+            # 从历史中找最近出现的部门名
+            dept_in_history = re.findall(r'(研发部|产品部|市场部|管理层|技术部|人事部)', history)
+            last_dept = dept_in_history[-1] if dept_in_history else ""
+
+            # 按需推断
+            if wants_person and last_person:
+                intent.entities["person"] = last_person
+                yield ("trace", {"step": "entity_infer", "content": f"从历史推断人名: {last_person}"})
+            elif wants_dept and last_dept:
+                intent.entities["department"] = last_dept
+                yield ("trace", {"step": "entity_infer", "content": f"从历史推断部门: {last_dept}"})
+            elif last_person:
+                # 默认推断人名
+                intent.entities["person"] = last_person
+                yield ("trace", {"step": "entity_infer", "content": f"从历史推断人名(默认): {last_person}"})
 
         # ---- 推理说明 ----
         if intent.reasoning:
@@ -92,7 +132,15 @@ class ResponseFusion:
         db_results: list[dict[str, Any]] = []
         if intent.has_db_intent:
             yield ("trace", {"step": "sql_generate", "content": "LLM 根据 schema 生成 SQL..."})
-            queries = self.sql_gen.generate(intent.original_question)
+            # 将实体（人名、部门）传给 SQL 生成器
+            sql_question = intent.original_question
+            person = intent.entities.get("person", "")
+            dept = intent.entities.get("department", "")
+            if person and person not in sql_question:
+                sql_question = f"{person} {sql_question}"
+            elif dept and dept not in sql_question:
+                sql_question = f"{dept} {sql_question}"
+            queries = self.sql_gen.generate(sql_question)
             if not queries:
                 yield ("trace", {"step": "sql_fallback", "content": "SQL 生成失败，使用降级查询"})
             else:
@@ -121,8 +169,27 @@ class ResponseFusion:
         # ---- 2. 知识库检索 ----
         kb_results: list[SearchResult] = []
         if intent.has_kb_intent:
-            yield ("trace", {"step": "kb_search", "content": "知识库 BM25+向量检索中..."})
-            kb_results = self.kb.search(intent.original_question, top_k=5)
+            # 从实体和 SQL 结果提取信息，增强 KB 检索命中率
+            kb_query = intent.original_question
+            person = intent.entities.get("person", "")
+            dept = intent.entities.get("department", "")
+            if person and person not in kb_query:
+                kb_query = f"{person} {kb_query}"
+            if dept and dept not in kb_query:
+                kb_query = f"{dept} {kb_query}"
+            for r in db_results:
+                if "rows" not in r:
+                    continue
+                for row in r["rows"]:
+                    level = row.get("level", "")
+                    dept = row.get("department", "")
+                    if level and level not in kb_query:
+                        kb_query += f" {level}"
+                    if dept and dept not in kb_query:
+                        kb_query += f" {dept}"
+
+            yield ("trace", {"step": "kb_search", "content": f"知识库 BM25+向量检索中... 增强查询: {kb_query}"})
+            kb_results = self.kb.search(kb_query, top_k=10)
             if kb_results:
                 files = list(set(r.chunk.source_file for r in kb_results))
                 yield ("trace", {
@@ -147,7 +214,10 @@ class ResponseFusion:
 
         if not db_text and not kb_text:
             yield ("trace", {"step": "done", "content": "无结果"})
-            return "抱歉，没有找到相关信息。"
+            msg = "抱歉，没有找到相关信息。"
+            yield ("answer_chunk", {"token": msg})
+            yield ("answer_done", {"sources": []})
+            return msg
 
         yield ("trace", {"step": "llm_format", "content": "LLM 逐 token 生成回答..."})
 
@@ -198,7 +268,7 @@ class ResponseFusion:
                     "model": self.llm_model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.3,
-                    "max_tokens": 800,
+                    "max_tokens": 1500,
                     "stream": True,
                 },
                 headers={
@@ -244,7 +314,7 @@ class ResponseFusion:
                     "model": self.llm_model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.3,
-                    "max_tokens": 800,
+                    "max_tokens": 1500,
                 },
                 headers={
                     "Authorization": f"Bearer {self.llm_api_key}",

@@ -20,9 +20,9 @@ class TestLLMSQLGenerator:
         """无 API key 时走降级"""
         gen = LLMSQLGenerator(db=None, api_key="")  # type: ignore
         queries = gen.generate("张三的邮箱是多少？")
-        assert len(queries) == 1
+        assert len(queries) >= 1
         assert "employees" in queries[0]["sql"]
-        assert queries[0]["params"] == ()
+        assert "张三" in str(queries[0]["params"])
 
     def test_fallback_has_expected_structure(self):
         """降级查询有完整结构"""

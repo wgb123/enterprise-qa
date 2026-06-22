@@ -67,17 +67,26 @@ def _load_knowledge_docs(root_path: str) -> list[DocumentChunk]:
 
         # 按标题（## 或 #）分块
         sections = re.split(r'(?=^#+\s)', content, flags=re.MULTILINE)
-        current_section = "概述"
+        # 跟踪标题层级路径，如 ["晋升评定标准", "晋升条件", "P5 → P6"]
+        heading_path: list[str] = ["概述"]
 
         for section_text in sections:
             section_text = section_text.strip()
             if not section_text:
                 continue
 
-            # 提取章节标题
-            header_match = re.match(r'^#+\s+(.+)$', section_text, re.MULTILINE)
+            # 提取章节标题，维护标题层级路径
+            header_match = re.match(r'^(#+)\s+(.+)$', section_text, re.MULTILINE)
             if header_match:
-                current_section = header_match.group(1).strip()
+                level = len(header_match.group(1))    # #=1, ##=2, ###=3
+                name = header_match.group(2).strip()
+                # 保持前 level-1 级不变，用新标题替换第 level 级
+                heading_path = heading_path[:level]
+                if len(heading_path) <= level:
+                    heading_path.append(name)
+                else:
+                    heading_path[level] = name
+                current_section = name  # 保持向后兼容
 
             # 跳过纯标题块（没有正文内容）
             body = re.sub(r'^#+\s+.*$', '', section_text, flags=re.MULTILINE).strip()
@@ -89,9 +98,11 @@ def _load_knowledge_docs(root_path: str) -> list[DocumentChunk]:
             for para in paragraphs:
                 if len(para) < 10:
                     continue
+                # 用完整标题路径（> 分隔）作为内容前缀，提高 BM25 命中率
+                heading_label = " > ".join(heading_path)
                 chunks.append(DocumentChunk(
                     doc_id=f"{rel_path}#{current_section}#{chunk_id}",
-                    content=para,
+                    content=f"{heading_label}: {para}",
                     source_file=rel_path,
                     section=current_section,
                     metadata={"file": rel_path, "heading": current_section},
