@@ -4,7 +4,6 @@ __MACOSX/
 
 # Runtime data
 enterprise-qa/data/
-enterprise-qa/.claude/
 
 # Python
 __pycache__/
