@@ -454,6 +454,8 @@ async function loadConversations() {
       item.onclick = () => switchConversation(c.id);
       list.appendChild(item);
     }
+    // 同步右侧抽屉的会话列表（移动端）
+    syncDrawerConvList();
   } catch(e) {}
 }
 
@@ -572,40 +574,32 @@ function syncDrawerContent() {
   // 右侧抽屉的 conv-list 由 loadConversations 填充
 }
 
-// 覆写 loadConversations 以同步右侧抽屉
-const _origLoadConv = loadConversations;
-loadConversations = async function() {
-  await _origLoadConv.call(this);
-  // 同步右侧抽屉的会话列表
+// 同步右侧抽屉的会话列表（移动端）
+function syncDrawerConvList() {
   const srcList = document.getElementById('convList');
   const dstList = document.getElementById('drawerRightBody');
-  if (srcList && dstList) {
-    dstList.innerHTML = '';
-    const header = document.createElement('div');
-    header.className = 'conv-header';
-    header.innerHTML = '<span>💬 会话记录</span><button class="conv-new" onclick="newConversation(); closeDrawers();">＋</button>';
-    dstList.appendChild(header);
-    const list = document.createElement('div');
-    list.className = 'conv-list';
-    list.id = 'drawerConvList';
-    // 克隆所有会话项并绑定关闭抽屉事件
-    for (const child of srcList.children) {
-      const clone = child.cloneNode(true);
-      const cid = clone.getAttribute('data-cid') || '';
-      clone.onclick = (e) => {
-        if (e.target.closest('.ci-del')) return;
-        const id = clone.getAttribute('data-cid');
-        if (id) { switchConversation(id); closeDrawers(); }
-      };
-      list.appendChild(clone);
-    }
-    dstList.appendChild(list);
+  if (!srcList || !dstList) return;
+  dstList.innerHTML = '';
+  const header = document.createElement('div');
+  header.className = 'conv-header';
+  header.innerHTML = '<span>💬 会话记录</span><button class="conv-new" onclick="newConversation(); closeDrawers();">＋</button>';
+  dstList.appendChild(header);
+  const list = document.createElement('div');
+  list.className = 'conv-list';
+  // 克隆所有会话项
+  for (const child of srcList.children) {
+    const clone = child.cloneNode(true);
+    clone.onclick = (e) => {
+      if (e.target.closest('.ci-del')) return;
+      const id = clone.getAttribute('data-cid');
+      if (id) { switchConversation(id); closeDrawers(); }
+    };
+    list.appendChild(clone);
   }
-};
+  dstList.appendChild(list);
+}
 
-// 覆写 loadConversations 的项构建，添加 data-cid 属性
-const _origBuildItem = window.buildConvItem || null;
-// 初始化：同步 drawer 内容
+// 初始化：同步 drawer 内容 + 加载会话
 window.addEventListener('load', function() {
   syncDrawerContent();
   loadConversations();
