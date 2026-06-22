@@ -111,21 +111,16 @@ class QAHandler(BaseHTTPRequestHandler):
             emit("trace", {"step": "classify", "content": "分析问题意图..."})
             intent = classify_intent(question, llm_classifier=llm_clf)
 
-            # Step 2: 流式执行
-            answer = ""
+            # Step 2: 流式执行（逐 token 实时推送）
             gen = fusion.answer_stream(intent)
             try:
                 while True:
                     event_type, data = next(gen)
                     emit(event_type, data)
-            except StopIteration as e:
-                answer = e.value or ""
+            except StopIteration:
+                pass
 
-            # 发送最终回答
-            if answer:
-                emit("answer_full", {"text": answer})
-
-            # 发送最终 DONE
+            # 流式结束
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
 

@@ -107,3 +107,80 @@ class TestResponseFusion:
         answer, trace = fusion.answer(classify_intent(""))
         self._check_answer(answer)
         assert len(trace) > 0
+
+
+class TestStreaming:
+    """流式输出测试——验证 answer_stream 的事件序列"""
+
+    def _collect_stream(self, fusion, question: str) -> list[tuple[str, dict]]:
+        events: list[tuple[str, dict]] = []
+        gen = fusion.answer_stream(classify_intent(question))
+        try:
+            while True:
+                events.append(next(gen))
+        except StopIteration:
+            pass
+        return events
+
+    def test_stream_has_answer_chunk(self, fusion):
+        """流式输出包含 answer_chunk 事件"""
+        events = self._collect_stream(fusion, "张三的邮箱是多少？")
+        event_types = [e[0] for e in events]
+        assert "answer_chunk" in event_types, f"缺少 answer_chunk 事件，实际类型: {event_types}"
+
+    def test_stream_ends_with_answer_done(self, fusion):
+        """流式输出以 answer_done 结束"""
+        events = self._collect_stream(fusion, "研发部有哪些项目？")
+        assert events[-1][0] == "answer_done", f"最后事件不是 answer_done: {events[-1]}"
+
+    def test_stream_answer_chunk_has_token(self, fusion):
+        """answer_chunk 事件包含 token 字段"""
+        events = self._collect_stream(fusion, "年假怎么算？")
+        for et, data in events:
+            if et == "answer_chunk":
+                assert "token" in data
+                break
+        else:
+            pytest.fail("没有 answer_chunk 事件")
+
+    def test_stream_trace_present(self, fusion):
+        """流式输出包含 trace 事件"""
+        events = self._collect_stream(fusion, "张三在哪个部门？")
+        event_types = [e[0] for e in events]
+        assert "trace" in event_types, f"缺少 trace 事件: {event_types}"
+
+    def test_stream_token_order(self, fusion):
+        """answer_chunk 按顺序出现，且不早于 trace"""
+        events = self._collect_stream(fusion, "王五符合晋升条件吗？")
+        saw_trace_llm = False
+        saw_answer = False
+        for et, _ in events:
+            if et == "trace":
+                saw_trace_llm = True
+            if et == "answer_chunk":
+                saw_answer = True
+                assert saw_trace_llm, "answer_chunk 出现在 trace 之前"
+        assert saw_answer, "没有 answer_chunk 事件"
+
+    def test_stream_answer_done_has_sources(self, fusion):
+        """answer_done 事件包含 sources 字段"""
+        events = self._collect_stream(fusion, "张三的邮箱是多少？")
+        for et, data in events:
+            if et == "answer_done":
+                assert "sources" in data
+                break
+        else:
+            pytest.fail("没有 answer_done 事件")
+
+    def test_stream_consistency_with_answer(self, fusion):
+        """流式收集的 token 拼接后 = answer() 返回的文本"""
+        events = self._collect_stream(fusion, "迟到怎么扣钱？")
+        streamed_tokens = "".join(
+            data.get("token", "") for et, data in events if et == "answer_chunk"
+        )
+        answer_text, _ = fusion.answer(classify_intent("迟到怎么扣钱？"))
+        assert streamed_tokens == answer_text, (
+            f"流式拼接结果与 answer() 不一致\n"
+            f"  流式: {streamed_tokens}\n"
+            f"  answer: {answer_text}"
+        )

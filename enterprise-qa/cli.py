@@ -81,17 +81,25 @@ def main():
         if intent.reasoning:
             print(f"[推理] {intent.reasoning}")
 
-        # 流式执行
+        # 流式执行——逐 token 实时输出
         gen = fusion.answer_stream(intent)
-        answer = ""
+        answer_parts: list[str] = []
         try:
             while True:
                 event_type, data = next(gen)
                 if event_type == "trace":
                     print(f"  [{data.get('step', '')}] {data.get('content', '')}")
+                elif event_type == "answer_chunk":
+                    token = data.get("token", "")
+                    print(token, end="", flush=True)
+                    answer_parts.append(token)
+                elif event_type == "answer_done":
+                    pass  # 流式结束
         except StopIteration as e:
             answer = e.value or ""
-        print(f"\n{answer}")
+        # 如果没有流式 token（降级路径），直接打印完整回答
+        if not answer_parts:
+            print(f"\n{answer}")
 
 
 def single_query(question: str) -> str:

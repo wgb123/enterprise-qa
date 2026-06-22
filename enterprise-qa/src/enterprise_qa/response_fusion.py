@@ -1,6 +1,6 @@
 """结果融合——逐步流式执行，每步产出 SSE 事件
 
-yield (event_type, data_dict) 元组，最终 yield ("done", {answer})
+yield (event_type, data_dict) 元组，最终 return 完整回答。
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ class ResponseFusion:
         self.llm_model = llm_model or "deepseek-chat"
 
     def answer(self, intent: IntentResult) -> tuple[str, list[tuple[str, dict]]]:
-        """非流式执行查询，返回 (回答文本, 事件列表)"""
+        """非流式包装——收集所有事件，返回 (回答文本, 事件列表)"""
         trace: list[tuple[str, dict]] = []
         gen = self.answer_stream(intent)
         try:
@@ -73,8 +73,9 @@ class ResponseFusion:
         Yields:
             ("reasoning", {text, query_type})
             ("trace", {step, content, ...})
-            ("answer_chunk", {token})  或  ("answer_full", {text})
-        最终 return: 完整回答文本
+            ("answer_chunk", {token})          # LLM 逐 token 流式输出
+            ("answer_done", {sources})         # 流式结束，附带来源
+        最终 return: 完整回答文本（含来源标注）
         """
         sources: list[str] = []
 
@@ -140,7 +141,7 @@ class ResponseFusion:
         else:
             yield ("trace", {"step": "kb_skip", "content": "无需知识库查询"})
 
-        # ---- 3. 序列化 + LLM 生成 ----
+        # ---- 3. 序列化 + LLM 流式生成 ----
         db_text = self._serialize_db_results(db_results)
         kb_text = self._serialize_kb_results(kb_results)
 
@@ -148,7 +149,7 @@ class ResponseFusion:
             yield ("trace", {"step": "done", "content": "无结果"})
             return "抱歉，没有找到相关信息。"
 
-        yield ("trace", {"step": "llm_format", "content": "LLM 生成自然语言回答..."})
+        yield ("trace", {"step": "llm_format", "content": "LLM 逐 token 生成回答..."})
 
         prompt = _ANSWER_PROMPT.format(
             question=intent.original_question,
@@ -156,11 +157,19 @@ class ResponseFusion:
             kb_results=kb_text or "（无知识库结果）",
         )
 
-        # LLM 生成回答
-        text = self._call_llm(prompt) or self._format_raw(db_text, kb_text, sources)
+        # 流式调用 LLM，逐 token yield
+        full_text = ""
+        for token in self._call_llm_stream(prompt):
+            full_text += token
+            yield ("answer_chunk", {"token": token})
+
+        # LLM 不可用时走降级
+        if not full_text:
+            full_text = self._format_raw(db_text, kb_text, sources)
+            yield ("answer_chunk", {"token": full_text})
 
         # 清理 + 追加来源
-        text = re.sub(r'\n*> 来源[：:].*$', '', text, flags=re.MULTILINE).strip()
+        full_text = re.sub(r'\n*> 来源[：:].*$', '', full_text, flags=re.MULTILINE).strip()
         if sources:
             src_parts = []
             for s in sources:
@@ -168,15 +177,64 @@ class ResponseFusion:
                 if s and s not in src_parts:
                     src_parts.append(s)
             if src_parts:
-                text += "\n\n> 来源: " + " | ".join(src_parts)
+                source_line = "\n\n> 来源: " + " | ".join(src_parts)
+                full_text += source_line
+                yield ("answer_chunk", {"token": source_line})
 
-        yield ("trace", {"step": "done", "content": "回答完成", "sources": sources})
-        return text
+        yield ("answer_done", {"sources": sources})
+        return full_text
 
-    # ── LLM 调用 ──
+    # ── LLM 流式调用（SSE stream=True） ──
+
+    def _call_llm_stream(self, prompt: str) -> Generator[str, None, None]:
+        """调用 LLM 流式 API，逐 token yield 文本内容"""
+        if not self.llm_api_key:
+            return
+
+        try:
+            resp = requests.post(
+                f"{self.llm_api_base}/chat/completions",
+                json={
+                    "model": self.llm_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": 800,
+                    "stream": True,
+                },
+                headers={
+                    "Authorization": f"Bearer {self.llm_api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                },
+                stream=True,
+                timeout=30,
+            )
+            resp.raise_for_status()
+
+            for line in resp.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                # SSE 格式：data: {...}
+                if line.startswith("data: "):
+                    payload = line[6:]
+                    if payload.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        continue
+
+        except requests.RequestException:
+            return
+
+    # ── 降级非流式 LLM 调用（备用） ──
 
     def _call_llm(self, prompt: str) -> str | None:
-        """调用 LLM 生成回答"""
+        """非流式 LLM 调用（降级备用）"""
         if not self.llm_api_key:
             return None
         try:
