@@ -1,0 +1,27 @@
+# Skill 配置文件示例
+# enterprise-qa-data/config.yaml.example
+
+# 数据库配置
+database:
+  type: sqlite
+  path: ./enterprise.db
+
+# 知识库配置
+knowledge_base:
+  root_path: ./knowledge
+  index_type: bm25  # 可选：bm25, embedding
+
+# LLM 配置（如需）
+llm:
+  provider: openai  # 可选：openai, dashscope, local
+  api_key: ${LLM_API_KEY}
+  api_base: ${LLM_BASE_URL:-https://api.openai.com/v1}
+  model: gpt-4o-mini
+
+# 时区设置
+timezone: Asia/Shanghai
+
+# 日志配置
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  file: ./logs/enterprise-qa.log

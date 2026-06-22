@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.coverage
+.pytest_cache/
+
+# OS
+.DS_Store
+__MACOSX/
+
+# Project data (external)
+enterprise-qa-data/enterprise.db
+enterprise-qa-data/qdrant_kb/
+
+# IDE
+.vscode/
+.idea/

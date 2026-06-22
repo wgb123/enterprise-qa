@@ -1,0 +1,19 @@
+# OS garbage from unzipping
+__MACOSX/
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.coverage
+.pytest_cache/
+
+# Project binary data
+enterprise-qa/enterprise-qa-data/enterprise.db
+enterprise-qa/enterprise-qa-data/qdrant_kb/
+
+# IDE
+.vscode/
+.idea/

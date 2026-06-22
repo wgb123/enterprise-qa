@@ -1,0 +1,29 @@
+# 企业智能问答助手 配置文件
+# 复制自 enterprise-qa-data/config.yaml.example，按需修改
+
+# 数据库配置
+database:
+  type: sqlite
+  path: ../enterprise-qa-data/enterprise.db   # 相对路径（从本项目根目录到数据目录）
+
+# 知识库配置
+knowledge_base:
+  root_path: ../enterprise-qa-data/knowledge   # 知识库目录
+  index_type: hybrid                           # bm25 / vector / hybrid
+
+# LLM 配置（增强回答生成场景用）
+llm:
+  provider: deepseek
+  api_key: sk-7f65ac958ce9489ea4368a0a67b064e1
+  api_base: https://api.deepseek.com/v1
+  model: deepseek-v4-flash
+
+# 向量嵌入配置
+embedding:
+  mode: local                                    # local / api
+  # 本地模型配置
+  local_model: BAAI/bge-small-zh-v1.5
+  dimension: 512
+
+# 时区
+timezone: Asia/Shanghai
