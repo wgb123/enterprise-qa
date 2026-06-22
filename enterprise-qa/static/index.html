@@ -136,9 +136,90 @@
 
   .cursor { display: inline-block; width: 2px; height: 16px; background: var(--accent); animation: blink 0.8s infinite; vertical-align: text-bottom; margin-left: 2px; }
   @keyframes blink { 50% { opacity: 0; } }
+
+  /* ── 移动端导航栏 ── */
+  .mobile-nav {
+    display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: #fff; border-bottom: 1px solid var(--border);
+    padding: 0 12px; height: 52px; align-items: center; justify-content: space-between;
+  }
+  .mobile-nav .mn-left, .mobile-nav .mn-right { display: flex; gap: 4px; }
+  .mobile-nav button {
+    background: none; border: none; width: 40px; height: 40px; border-radius: 8px;
+    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    color: var(--text); transition: background 0.15s;
+  }
+  .mobile-nav button:hover, .mobile-nav button:active { background: var(--accent-light); }
+  .mobile-nav .mn-title { font-size: 16px; font-weight: 600; }
+
+  /* ── 移动端遮罩 ── */
+  .drawer-overlay {
+    display: none; position: fixed; inset: 0; z-index: 90;
+    background: rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.3s;
+  }
+  .drawer-overlay.show { opacity: 1; }
+
+  /* ── 移动端抽屉 ── */
+  .drawer {
+    display: none; position: fixed; top: 0; bottom: 0; z-index: 95;
+    width: 280px; max-width: 85vw; background: #fff;
+    transition: transform 0.3s ease; overflow-y: auto;
+  }
+  .drawer-left { left: 0; transform: translateX(-100%); }
+  .drawer-right { right: 0; transform: translateX(100%); }
+  .drawer.open { transform: translateX(0); }
+  .drawer .drawer-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px; border-bottom: 1px solid var(--border);
+    font-size: 15px; font-weight: 600;
+  }
+  .drawer .drawer-header button {
+    background: none; border: none; width: 32px; height: 32px; border-radius: 6px;
+    font-size: 18px; cursor: pointer; color: var(--sub); display: flex; align-items: center; justify-content: center;
+  }
+  .drawer .drawer-header button:hover { background: var(--accent-light); }
+  .drawer .drawer-body { padding: 16px; }
+
+  /* ── 响应式 ── */
+  @media (max-width: 768px) {
+    body { padding-top: 52px; }
+    .sidebar, .conv-panel { display: none; }
+    .main { max-width: 100%; }
+    .chat { padding: 14px 12px; max-width: 100%; }
+    .input-bar { padding: 10px 12px 16px; max-width: 100%; }
+    .input-bar button { padding: 10px 14px; }
+    .mobile-nav { display: flex; }
+    .drawer-overlay { display: block; }
+    .drawer { display: block; }
+    .msg { max-width: 92%; font-size: 15px; padding: 10px 14px; }
+    .quick-asks button { font-size: 12px; padding: 6px 12px; }
+    .welcome h2 { font-size: 18px; }
+  }
 </style>
 </head>
 <body>
+
+<!-- 移动端导航栏 -->
+<div class="mobile-nav">
+  <div class="mn-left"><button onclick="toggleDrawer('left')" title="菜单">☰</button></div>
+  <div class="mn-title">💼 企业问答</div>
+  <div class="mn-right"><button onclick="toggleDrawer('right')" title="会话记录">💬</button></div>
+</div>
+
+<!-- 移动端遮罩 -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawers()"></div>
+
+<!-- 移动端左侧抽屉（项目信息） -->
+<div class="drawer drawer-left" id="drawerLeft">
+  <div class="drawer-header"><span>💼 企业问答</span><button onclick="closeDrawers()">✕</button></div>
+  <div class="drawer-body" id="drawerLeftBody"></div>
+</div>
+
+<!-- 移动端右侧抽屉（会话记录） -->
+<div class="drawer drawer-right" id="drawerRight">
+  <div class="drawer-header"><span>💬 会话记录</span><button onclick="closeDrawers()">✕</button></div>
+  <div class="drawer-body" id="drawerRightBody"></div>
+</div>
 
 <div class="sidebar">
   <h1>💼 企业问答</h1>
@@ -344,6 +425,7 @@ async function loadConversations() {
     for (const c of data.data || []) {
       const item = document.createElement('div');
       item.className = 'conv-item' + (c.id === window.conversationId ? ' active' : '');
+      item.setAttribute('data-cid', c.id);
       
       const title = document.createElement('div');
       title.className = 'ci-title';
@@ -381,6 +463,7 @@ function newConversation() {
   document.getElementById('chat').appendChild(document.getElementById('welcome'));
   document.getElementById('welcome').style.display = '';
   loadConversations();
+  closeDrawers();
 }
 
 async function switchConversation(id) {
@@ -452,8 +535,81 @@ async function deleteConversation(id) {
   }
 }
 
-// 初始化加载会话列表
-window.addEventListener('load', loadConversations);
+// ── 移动端抽屉控制 ──
+
+function toggleDrawer(side) {
+  const drawer = document.getElementById('drawer' + (side === 'left' ? 'Left' : 'Right'));
+  const overlay = document.getElementById('drawerOverlay');
+  const isOpen = drawer.classList.contains('open');
+  closeDrawers();
+  if (!isOpen) {
+    drawer.classList.add('open');
+    overlay.classList.add('show');
+    document.body.style.overflow = 'hidden';
+  }
+}
+
+function closeDrawers() {
+  document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
+  document.getElementById('drawerOverlay').classList.remove('show');
+  document.body.style.overflow = '';
+}
+
+// 加载左侧抽屉内容（从 sidebar 复制）
+function syncDrawerContent() {
+  const sidebar = document.querySelector('.sidebar');
+  const drawerBody = document.getElementById('drawerLeftBody');
+  if (sidebar && drawerBody) {
+    drawerBody.innerHTML = sidebar.innerHTML;
+    // 绑定抽屉内 conv-list 的点击
+    const list = drawerBody.querySelector('#convList');
+    if (list) {
+      // 移动端关闭抽屉后切换会话
+      const orig = list.querySelectorAll('.conv-item');
+      // 保留原有事件（由 loadConversations 重建）
+    }
+  }
+  // 右侧抽屉的 conv-list 由 loadConversations 填充
+}
+
+// 覆写 loadConversations 以同步右侧抽屉
+const _origLoadConv = loadConversations;
+loadConversations = async function() {
+  await _origLoadConv.call(this);
+  // 同步右侧抽屉的会话列表
+  const srcList = document.getElementById('convList');
+  const dstList = document.getElementById('drawerRightBody');
+  if (srcList && dstList) {
+    dstList.innerHTML = '';
+    const header = document.createElement('div');
+    header.className = 'conv-header';
+    header.innerHTML = '<span>💬 会话记录</span><button class="conv-new" onclick="newConversation(); closeDrawers();">＋</button>';
+    dstList.appendChild(header);
+    const list = document.createElement('div');
+    list.className = 'conv-list';
+    list.id = 'drawerConvList';
+    // 克隆所有会话项并绑定关闭抽屉事件
+    for (const child of srcList.children) {
+      const clone = child.cloneNode(true);
+      const cid = clone.getAttribute('data-cid') || '';
+      clone.onclick = (e) => {
+        if (e.target.closest('.ci-del')) return;
+        const id = clone.getAttribute('data-cid');
+        if (id) { switchConversation(id); closeDrawers(); }
+      };
+      list.appendChild(clone);
+    }
+    dstList.appendChild(list);
+  }
+};
+
+// 覆写 loadConversations 的项构建，添加 data-cid 属性
+const _origBuildItem = window.buildConvItem || null;
+// 初始化：同步 drawer 内容
+window.addEventListener('load', function() {
+  syncDrawerContent();
+  loadConversations();
+});
 </script>
 </body>
 </html>
