@@ -266,9 +266,11 @@ async function send() {
               reasoningText = p.text;
             } else if (p.type === 'trace') {
               traceSteps.push(p);
-            } else if (p.type === 'answer_full') {
+            } else if (p.type === 'answer_chunk') {
               answerStarted = true;
-              fullAnswer = p.text;
+              fullAnswer += p.token || '';
+            } else if (p.type === 'answer_done') {
+              sources = p.sources || [];
             }
           } catch(e) {}
         }
@@ -276,12 +278,8 @@ async function send() {
       updateDisplay();
     }
 
-    // 提取来源
-    const srcMatch = fullAnswer.match(/> 来源: (.+)$/m);
-    if (srcMatch) {
-      sources = srcMatch[1].split(' | ').map(s => s.trim()).filter(Boolean);
-      fullAnswer = fullAnswer.replace(/> 来源: .+$/m, '').trim();
-    }
+    // 从回答文本中清除来源行（如有，降级路径可能有）
+    fullAnswer = fullAnswer.replace(/\n*> 来源: .+$/m, '').trim();
     updateDisplay();
 
   } catch(e) {
