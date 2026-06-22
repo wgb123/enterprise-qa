@@ -206,7 +206,7 @@ async function send() {
     
     // 思考过程
     if (reasoningText || traceSteps.length > 0) {
-      html += '<div class="thinking-box' + (answerStarted ? '' : '') + '">';
+      html += '<div class="thinking-box open">';
       html += '<div class="thinking-header" onclick="this.parentElement.classList.toggle(\'open\')">';
       html += '<span class="arrow">▶</span> 思考过程' + (answerStarted ? ' ✓' : '...') + '</div>';
       html += '<div class="thinking-body">';
