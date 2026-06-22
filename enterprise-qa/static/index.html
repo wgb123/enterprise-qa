@@ -186,19 +186,19 @@ async function send() {
   input.value = '';
   setLoading(true);
 
-  // 机器人消息容器
-  botDiv = document.createElement('div');
-  botDiv.className = 'msg bot';
-  botDiv.innerHTML = '<span class="cursor"></span>';
-  chat.appendChild(botDiv);
-  chat.scrollTop = chat.scrollHeight;
-
   let reasoningText = '';
   let fullAnswer = '';
   let sources = [];
   let traceSteps = [];
   let botDiv = null;
   let answerStarted = false;
+
+  // 机器人消息容器
+  botDiv = document.createElement('div');
+  botDiv.className = 'msg bot';
+  botDiv.innerHTML = '<span class="cursor"></span>';
+  chat.appendChild(botDiv);
+  chat.scrollTop = chat.scrollHeight;
 
   function updateDisplay() {
     if (!botDiv) return;
