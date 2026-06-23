@@ -48,11 +48,12 @@ class Conversation:
         return "\n".join(lines)
 
     def get_title(self) -> str:
-        """第一条用户消息作为会话标题"""
+        """最后一条用户消息作为会话标题（与预览对应）"""
+        title = "(空)"
         for msg in self.messages:
             if msg.role == "user":
-                return msg.content[:30]
-        return "(空)"
+                title = msg.content[:30]
+        return title
 
     def trim(self) -> None:
         if len(self.messages) > self.max_turns * 2:
